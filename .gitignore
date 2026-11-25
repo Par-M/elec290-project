@@ -1,2 +1,3 @@
 **/.DS_Store
 .vscode/
+arduino_main/arduino_secrets.h
