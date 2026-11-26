@@ -21,7 +21,7 @@
 
 #include <Arduino.h>       // core Arduino functions: millis(), pinMode(), Serial...
 #include <ctype.h>         // toupper(), for case-insensitive commands
-#include <string.h>        // strtok(), strcmp(), strlen(), memcpy(), memcmp()
+#include <string.h>        // strtok(), strcmp_P(), strlen(), memcpy(), memcmp()
 
 // Our own project modules. Each header describes one piece of the system.
 #include "config.hpp"         // roles, pins, timeouts, Wi-Fi settings
@@ -145,8 +145,11 @@ static void onEvent(CommEvent event, uint16_t code) {
 // A self-test is a small program inside the program that checks the crypto is
 // behaving correctly. It returns true only if EVERY check passes.
 static bool selfTestCrypto() {
-    Encryption test;      // a SEPARATE cipher object so we don't disturb `crypto`
-    test.init();          // load the key
+    // Reuse the GLOBAL cipher object instead of creating a local one. A local
+    // Encryption holds a ChaChaPoly state (~250 bytes) on the stack, which is
+    // dangerous when the R3 only has ~400 bytes of stack left. Sharing is safe:
+    // every seal()/open() call installs a fresh IV, so no state carries over.
+    crypto.init();        // reload the key before testing
 
     // A made-up nonce and 7-byte header. The actual values do not matter as
     // long as they are the same for seal() and open().
@@ -158,9 +161,9 @@ static bool selfTestCrypto() {
     uint8_t cipher[5], tag[PROTO_TAG_LEN], plain[5];
 
     // Test 1: encrypt, then decrypt, and compare with the original.
-    if (!test.seal(nonce, aad, sizeof(aad), message, sizeof(message),
+    if (!crypto.seal(nonce, aad, sizeof(aad), message, sizeof(message),
                    cipher, tag, sizeof(tag))) return false;
-    if (!test.open(nonce, aad, sizeof(aad), cipher, sizeof(cipher),
+    if (!crypto.open(nonce, aad, sizeof(aad), cipher, sizeof(cipher),
                    tag, sizeof(tag), plain)) return false;
     if (memcmp(plain, message, sizeof(message)) != 0) return false;
 
@@ -170,16 +173,16 @@ static bool selfTestCrypto() {
     uint8_t wiped[5] = { 1, 2, 3, 4, 5 };
     memcpy(badTag, tag, sizeof(tag));
     badTag[0] ^= 0x01;              // XOR with 1 flips the lowest bit
-    if (test.open(nonce, aad, sizeof(aad), cipher, sizeof(cipher),
+    if (crypto.open(nonce, aad, sizeof(aad), cipher, sizeof(cipher),
                   badTag, sizeof(badTag), wiped)) return false;
     for (uint8_t i = 0; i < sizeof(wiped); i++) if (wiped[i] != 0) return false;
 
     // Test 3: ACKs have no payload. Check seal/open still work with len = 0.
     uint8_t emptyTag[PROTO_TAG_LEN];
     const uint8_t emptyPayload = 0;  // a real address, but we pass length 0
-    if (!test.seal(nonce, aad, sizeof(aad), &emptyPayload, 0,
+    if (!crypto.seal(nonce, aad, sizeof(aad), &emptyPayload, 0,
                    cipher, emptyTag, sizeof(emptyTag))) return false;
-    if (!test.open(nonce, aad, sizeof(aad), cipher, 0,
+    if (!crypto.open(nonce, aad, sizeof(aad), cipher, 0,
                    emptyTag, sizeof(emptyTag), plain)) return false;
 
     return true;    // reached the end => all tests passed
@@ -254,12 +257,14 @@ static void processLine(char *line) {
     upper(cmd);
     char *arg = trimLeft(strtok(nullptr, ""));
 
-    // strcmp() returns 0 when two C strings are identical.
-    if (strcmp(cmd, "HELP") == 0) {
+    // strcmp_P() compares a normal string with one stored in FLASH via PSTR().
+    // Like F() for Serial output, this keeps the command words out of SRAM.
+    // It returns 0 when the two strings are identical.
+    if (strcmp_P(cmd, PSTR("HELP")) == 0) {
         printHelp();
-    } else if (strcmp(cmd, "STATUS") == 0) {
+    } else if (strcmp_P(cmd, PSTR("STATUS")) == 0) {
         printStatus();
-    } else if (strcmp(cmd, "SEND") == 0) {
+    } else if (strcmp_P(cmd, PSTR("SEND")) == 0) {
         if (!arg || *arg == '\0') {
             Serial.println(F("USAGE: SEND <text>"));
         } else if (strlen(arg) > PROTO_MAX_PAYLOAD) {
@@ -275,8 +280,8 @@ static void processLine(char *line) {
         } else {
             Serial.println(F("TX ERROR"));
         }
-    } else if (strcmp(cmd, "WIFI") == 0) {
-        if (!arg || *arg == '\0' || strcmp(arg, "STATUS") == 0) {
+    } else if (strcmp_P(cmd, PSTR("WIFI")) == 0) {
+        if (!arg || *arg == '\0' || strcmp_P(arg, PSTR("STATUS")) == 0) {
             Serial.print(F("WIFI "));
 #if BOARD_HAS_WIFI
             Serial.println(wifi.connected() ? F("UP") : F("DOWN"));
@@ -290,7 +295,7 @@ static void processLine(char *line) {
             // any of the connection code below (it is compiled out anyway).
             Serial.println(F("WIFI NOT AVAILABLE"));
 #else
-            if (strcmp(arg, "ON") == 0) {
+            if (strcmp_P(arg, PSTR("ON")) == 0) {
                 if (comm.busy()) {
                     Serial.println(F("BUSY"));
                 } else if (wifi.connect()) {
@@ -300,7 +305,7 @@ static void processLine(char *line) {
                 } else {
                     Serial.println(F("WIFI FAIL"));
                 }
-            } else if (strcmp(arg, "OFF") == 0) {
+            } else if (strcmp_P(arg, PSTR("OFF")) == 0) {
                 if (comm.busy()) {
                     Serial.println(F("BUSY"));
                 } else {
@@ -314,7 +319,7 @@ static void processLine(char *line) {
             }
 #endif
         }
-    } else if (strcmp(cmd, "SELFTEST") == 0 || strcmp(cmd, "TEST") == 0) {
+    } else if (strcmp_P(cmd, PSTR("SELFTEST")) == 0 || strcmp_P(cmd, PSTR("TEST")) == 0) {
         Serial.println(selfTestCrypto() ? F("SELFTEST PASS") : F("SELFTEST FAIL"));
     } else {
         Serial.println(F("UNKNOWN COMMAND - type HELP"));

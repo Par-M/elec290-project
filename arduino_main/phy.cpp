@@ -18,10 +18,14 @@
 // small numbers give plenty of tolerance for clock jitter. The 100 µs scale
 // is fine because our decoder only distinguishes ~500 µs from ~1000 µs.
 //
-// MAX_EDGES = 512. A full 47-byte packet is 24+8+47*8 = 408 Manchester bits,
-// producing roughly 450 edges (one mid-bit edge per bit plus boundary edges).
-// 512 therefore has a little headroom, and now costs only 512 BYTES of RAM
-// instead of 1024. The exact frame gap still uses a separate 32-bit timestamp.
+// MAX_EDGES = 512. A full 47-byte packet is 24+8+47*8 = 408 Manchester bits.
+// Every bit has a mid-bit edge, and a second edge appears at the boundary when
+// two adjacent bits are equal. With random ciphertext that averages ~1.5 edges
+// per bit, i.e. ~600 edges for a FULL packet. So 512 is comfortable for short
+// messages but a maximum-length payload can overflow the buffer. Do NOT shrink
+// this further: the real fix for full-length messages is a streaming decoder
+// that decodes inside the ISR instead of storing edges. The exact frame gap is
+// still tracked by a separate 32-bit timestamp.
 //
 // `static` = private to this .cpp. `volatile` = "may change inside an interrupt;
 // never cache in a register". The buffers are global because an ISR cannot

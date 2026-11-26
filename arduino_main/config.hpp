@@ -66,7 +66,7 @@
 // 2. PC <-> ARDUINO (USB serial)
 // ---------------------------------------------------------------------------
 constexpr uint32_t CFG_SERIAL_BAUD   = 115200;  // bits per second; PC must match
-constexpr uint8_t  CFG_HOST_LINE_MAX = 64;      // longest accepted host line, bytes
+constexpr uint8_t  CFG_HOST_LINE_MAX = 48;      // longest accepted host line, bytes
 
 // ---------------------------------------------------------------------------
 // 3. STATUS RGB LED
